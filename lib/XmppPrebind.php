@@ -38,33 +38,39 @@ class XmppPrebind {
 
 	const SERVICE_NAME = 'xmpp';
 
-	private $jabberHost = '';
-	private $boshUri    = '';
-	private $resource   = '';
+	protected $jabberHost = '';
+	protected $boshUri    = '';
+	protected $resource   = '';
 
-	private $debug = false;
+	protected $debug = false;
 	/**
 	 * FirePHP Instance
 	 *
 	 * @var FirePHP
 	 */
-	private $firePhp = null;
+	protected $firePhp = null;
 
-	private $useGzip = false;
-	private $useSsl = false;
-	private $encryption = self::ENCRYPTION_PLAIN;
+	protected $useGzip = false;
+	protected $useSsl = false;
+	protected $encryption = self::ENCRYPTION_PLAIN;
 
-	private $jid = '';
-	private $password = '';
+	protected $jid = '';
+	protected $password = '';
 
-	private $rid = '';
-	private $sid = '';
+	protected $rid = '';
+	protected $sid = '';
 
-	private $doSession = false;
-	private $doBind    = false;
+	protected $doSession = false;
+	protected $doBind    = false;
 
-	private $mechanisms = array();
+	protected $mechanisms = array();
 
+	/**
+	 * Session creation response
+	 * 
+	 * @var DOMDocument
+	 */
+	public $response;
 
 	/**
 	 * Create a new XmppPrebind Object with the required params
@@ -116,16 +122,27 @@ class XmppPrebind {
 	 * @param string $password Password
 	 */
 	public function connect($username, $password) {
-		$this->jid      = $username . '@' . $this->jabberHost . '/' . $this->resource;
+		$this->jid      = $username . '@' . $this->jabberHost;
+		if($this->resource != null)
+            		$this->jid .= '/' . $this->resource;
 		$this->password = $password;
 
 		$response = $this->sendInitialConnection();
 
 		$body = self::getBodyFromXml($response);
-		$this->sid = $body->getAttribute('sid');
+		if (is_object($body)) {
+			$this->sid = $body->getAttribute('sid');
+		} else {
+			throw new Exception('Unable to connect to XMPP server');
+		}
 		$this->debug($this->sid, 'sid');
 
-		$mechanisms = $body->firstChild->firstChild->getElementsByTagName('mechanism');
+		$child = $body->firstChild->firstChild;
+		if (is_object($child)) {
+			$mechanisms = $child->getElementsByTagName('mechanism');
+		} else {
+			throw new Exception('Invalid response');
+		}
 
 		foreach ($mechanisms as $value) {
 			$this->mechanisms[] = $value->nodeValue;
@@ -142,6 +159,9 @@ class XmppPrebind {
 		}
 
 		$this->debug($this->encryption, 'encryption used');
+
+		// Assign session creation response
+		$this->response = $body;
 	}
 
 	/**
@@ -194,7 +214,7 @@ class XmppPrebind {
 	 * @param string $msg
 	 * @param string $label
 	 */
-	private function debug($msg, $label = null) {
+	protected function debug($msg, $label = null) {
 		if ($this->firePhp) {
 			$this->firePhp->log($msg, $label);
 		}
@@ -205,7 +225,7 @@ class XmppPrebind {
 	 *
 	 * @return string Response
 	 */
-	private function sendRestart() {
+	protected function sendRestart() {
 		$domDocument = $this->buildBody();
 		$body = self::getBodyFromDomDocument($domDocument);
 		$body->appendChild(self::getNewTextAttribute($domDocument, 'to', $this->jabberHost));
@@ -235,7 +255,7 @@ class XmppPrebind {
 	 *
 	 * @return string Response
 	 */
-	private function sendBindIfRequired() {
+	protected function sendBindIfRequired() {
 		if ($this->doBind) {
 			$domDocument = $this->buildBody();
 			$body = self::getBodyFromDomDocument($domDocument);
@@ -263,7 +283,7 @@ class XmppPrebind {
 	/**
 	 * Send session if there's a session node in the restart response (within stream:features)
 	 */
-	private function sendSessionIfRequired() {
+	protected function sendSessionIfRequired() {
 		if ($this->doSession) {
 			$domDocument = $this->buildBody();
 			$body = self::getBodyFromDomDocument($domDocument);
@@ -289,7 +309,7 @@ class XmppPrebind {
 	 *
 	 * @return string Response
 	 */
-	private function sendInitialConnection() {
+	protected function sendInitialConnection() {
 		$domDocument = $this->buildBody();
 		$body = self::getBodyFromDomDocument($domDocument);
 
@@ -309,7 +329,7 @@ class XmppPrebind {
 	 *
 	 * @return string Challenge
 	 */
-	private function sendChallenge() {
+	protected function sendChallenge() {
 		$domDocument = $this->buildBody();
 		$body = self::getBodyFromDomDocument($domDocument);
 
@@ -332,7 +352,7 @@ class XmppPrebind {
 	 * @param Auth_SASL_Common $auth
 	 * @return string Auth XML to send
 	 */
-	private function buildPlainAuth(Auth_SASL_Common $auth) {
+	protected function buildPlainAuth(Auth_SASL_Common $auth) {
 		$authString = $auth->getResponse(self::getNodeFromJid($this->jid), $this->password, self::getBareJidFromJid($this->jid));
 		$authString = base64_encode($authString);
 		$this->debug($authString, 'PLAIN Auth String');
@@ -355,10 +375,10 @@ class XmppPrebind {
 	 * @param Auth_SASL_Common $auth
 	 * @return string Auth XML to send
 	 */
-	private function sendChallengeAndBuildDigestMd5Auth(Auth_SASL_Common $auth) {
+	protected function sendChallengeAndBuildDigestMd5Auth(Auth_SASL_Common $auth) {
 		$challenge = $this->sendChallenge();
 
-		$authString = $auth->getResponse(self::getNodeFromJid($this->jid), $this->password, $challenge, $this->jabberHost, self::SERVICE_NAME, $this->jid);
+		$authString = $auth->getResponse(self::getNodeFromJid($this->jid), $this->password, $challenge, $this->jabberHost, self::SERVICE_NAME);
 		$this->debug($authString, 'DIGEST-MD5 Auth String');
 
 		$authString = base64_encode($authString);
@@ -384,7 +404,7 @@ class XmppPrebind {
 	 * @param Auth_SASL_Common $auth
 	 * @return string Auth XML to send
 	 */
-	private function sendChallengeAndBuildCramMd5Auth(Auth_SASL_Common $auth) {
+	protected function sendChallengeAndBuildCramMd5Auth(Auth_SASL_Common $auth) {
 		$challenge = $this->sendChallenge();
 
 		$authString = $auth->getResponse(self::getNodeFromJid($this->jid), $this->password, $challenge);
@@ -410,7 +430,7 @@ class XmppPrebind {
 	 * CRAM-MD5 and DIGEST-MD5 reply with an additional challenge response which must be replied to.
 	 * After this additional reply, the server should reply with "success".
 	 */
-	private function replyToChallengeResponse($challengeResponse) {
+	protected function replyToChallengeResponse($challengeResponse) {
 		$body = self::getBodyFromXml($challengeResponse);
 		$challenge = base64_decode((string)$body->firstChild->nodeValue);
 		if (strpos($challenge, 'rspauth') === false) {
@@ -433,7 +453,7 @@ class XmppPrebind {
 	 * @param string $xml
 	 * @return string Response
 	 */
-	private function send($xml) {
+	protected function send($xml) {
 		$ch = curl_init($this->boshUri);
 		curl_setopt($ch, CURLOPT_HEADER, 0);
 		curl_setopt($ch, CURLOPT_POST, 1);
@@ -450,6 +470,11 @@ class XmppPrebind {
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
 
 		$response = curl_exec($ch);
+
+		// Check if curl failed to get response
+		if ($response === false) {
+			throw new XmppPrebindConnectionException("Cannot connect to service");
+		}
 
 		curl_close($ch);
 
@@ -498,7 +523,7 @@ class XmppPrebind {
 	 *
 	 * @return DOMDocument
 	 */
-	private function buildBody() {
+	protected function buildBody() {
 		$xml = new DOMDocument('1.0', 'UTF-8');
 
 		$body = $xml->createElement('body');
@@ -552,7 +577,7 @@ class XmppPrebind {
 	 * @param string $value
 	 * @return DOMNode
 	 */
-	private static function getNewTextAttribute($domDocument, $attributeName, $value) {
+	protected static function getNewTextAttribute($domDocument, $attributeName, $value) {
 		$attribute = $domDocument->createAttribute($attributeName);
 		$attribute->appendChild($domDocument->createTextNode($value));
 
@@ -565,7 +590,7 @@ class XmppPrebind {
 	 * @param DOMDocument $domDocument
 	 * @return DOMNode
 	 */
-	private static function getBodyFromDomDocument($domDocument) {
+	protected static function getBodyFromDomDocument($domDocument) {
 		$body = $domDocument->getElementsByTagName('body');
 		return $body->item(0);
 	}
@@ -577,7 +602,7 @@ class XmppPrebind {
 	 * @param string $xml
 	 * @return DOMNode
 	 */
-	private static function getBodyFromXml($xml) {
+	protected static function getBodyFromXml($xml) {
 		$domDocument = new DOMDocument();
 		$domDocument->loadXml($xml);
 
@@ -590,7 +615,7 @@ class XmppPrebind {
 	 *
 	 * @return int
 	 */
-	private function getAndIncrementRid() {
+	protected function getAndIncrementRid() {
 		return $this->rid++;
 	}
 
